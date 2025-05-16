@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-torch.manual_seed(1337)
+LINE_BREAK = "-----------------------------------\n"
+
+torch.manual_seed(18916)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 with open('input.txt', 'r', encoding='utf-8') as f:
@@ -65,11 +67,11 @@ def preview_batch():
 #   Input tokens: [24, 43, 58, 5, 57, 1], target: 46
 #   Input tokens: [24, 43, 58, 5, 57, 1, 46], target: 43
 
-''' Bigram model: simplest 2-gram model that predicts each token based on 
+''' *** class BigramLM(nn.Module) ***
+    Bigram model: simplest 2-gram model that predicts each token based on 
     only the previous token. Will not be very accurate since this model only
     assumes that each token depends on only the one immediately before it.
     '''
-
 class BigramLM(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
@@ -110,11 +112,66 @@ class BigramLM(nn.Module):
 
 vocab_size = len(chars)
 model = BigramLM(vocab_size).to(device)
-logits, loss = model(inputs, targets)
+logits, loss = model.forward(inputs, targets)
 print(logits.shape)
 print(loss)
 
 # Start from a single token (= 0) and generate 100 new tokens
 start = torch.zeros((1, 1), dtype=torch.long).to(device)
 generated = model.generate(start, max_new_tokens=100)
+print("* Testing generation with empty prompt")
+print("Input prompt:")
+print("\'newline char\'")
+print("Output:")
+print(decode(generated[0].tolist()))
+print(LINE_BREAK)
+
+# Sample generated output - gibberish
+'''lfJeukRuaRJKXAYtXzfJ:HEPiu--sDioi;ILCo3pHNTmDwJsfheKRxZCFs
+lZJ XQc?:s:HEzEnXalEPklcPU cL'DpdLCafBheH'''
+
+# Try generating with a starting prompt - still gibberish
+prompt = "To be, or not to be"
+prompt_idxs = torch.tensor(encode(prompt), dtype=torch.long).unsqueeze(0).to(device)
+generated = model.generate(prompt_idxs, max_new_tokens=100)
+print("* Generating with a prompt")
+print("Input prompt:")
+print(f"\'{prompt}\'")
+print("Output:")
+print(decode(generated[0].tolist()))
+print(LINE_BREAK)
+
+# Training the model using a PyTorch optimizer
+# The optimizer pdates model's params based on loss gradient to improve model performance
+lr = 1e-2
+optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+eval_interval = 32
+max_iters = 10000
+def train(verbose):
+    for iter in range(max_iters):
+        if iter % eval_interval == 0:
+            model.eval()
+            with torch.no_grad():
+                xb, yb = get_batch('train')
+                _, loss = model.forward(xb, yb)
+            if verbose: print(f"Step {iter}: loss = {loss.item():.4f}")
+            model.train()
+
+        # Sample batch of data
+        xb, yb = get_batch('train')
+        logit, loss = model.forward(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+# Getting better but still bad
+print(f"* Training with: max_iters = {max_iters}, eval_interval = {eval_interval}, lr={lr}")
+train(verbose=False) # Change verbose to True to output loss during training
+prompt = "To be, or not to be"
+with_prompt = True
+context = (torch.tensor(encode(prompt), dtype=torch.long).unsqueeze(0).to(device) 
+        if with_prompt
+        else torch.zeros((1, 1), dtype=torch.long).to(device))
+max_new_tokens = 200
+generated = model.generate(context, max_new_tokens=max_new_tokens)
 print(decode(generated[0].tolist()))
