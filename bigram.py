@@ -170,8 +170,8 @@ train(verbose=False) # Change verbose to True to output loss during training
 prompt = "To be, or not to be"
 with_prompt = True
 context = (torch.tensor(encode(prompt), dtype=torch.long).unsqueeze(0).to(device) 
-        if with_prompt
-        else torch.zeros((1, 1), dtype=torch.long).to(device))
+            if with_prompt
+            else torch.zeros((1, 1), dtype=torch.long).to(device))
 max_new_tokens = 200
 generated = model.generate(context, max_new_tokens=max_new_tokens)
 print(decode(generated[0].tolist()))
