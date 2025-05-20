@@ -32,7 +32,7 @@ percent_train = 0.9 # portion of data to be used as training set, rest is val
 train_data = data[:int(0.9 * len(data))]
 val_data = data[int(0.9 * len(data)):]
 
-batch_size = 4 # no. of independent sequences to process in parallel
+batch_size = 32 # no. of independent sequences to process in parallel
 block_size = 8 # max no. of tokens to use for context in predictions
 
 # Samples a mini-batch of sequence from either the training or validation set
