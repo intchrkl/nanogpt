@@ -44,9 +44,6 @@ percent_train = 0.9 # portion of data to be used as training set, rest is val
 train_data = data[:int(0.9 * len(data))]
 val_data = data[int(0.9 * len(data)):]
 
-batch_size = 32 # no. of independent sequences to process in parallel
-block_size = 8 # max no. of tokens to use for context in predictions
-
 # Samples a mini-batch of sequence from either the training or validation set
 def get_batch(split):
     data = train_data if split == 'train' else val_data
@@ -55,11 +52,25 @@ def get_batch(split):
     target_tensors = torch.stack([data[i + 1:i + block_size + 1] for i in start_idxs])
     return input_tensors.to(device), target_tensors.to(device)
 
+@torch.no_grad()
+def estimate_loss():
+    model.eval()
+    losses = {'train': 0, 'val': 0}
+    for split in ['train', 'val']:
+        loss_total = 0
+        for _ in range(eval_iters):
+            xb, yb = get_batch(split)
+            _, loss = model(xb, yb)
+            loss_total += loss.item()
+        losses[split] = loss_total / eval_iters
+    model.train()
+    return losses
+
 class Head(nn.Module):
     # A self-attention head
 
     def __init__(self, head_size):
-        super.__init__()
+        super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
@@ -69,7 +80,7 @@ class Head(nn.Module):
     def forward(self, x):
         B, T, C = x.shape
         k = self.key(x) # (B, T, C)
-        q = self.key(x) # (B, T, C)
+        q = self.query(x) # (B, T, C)
 
         # From Attention Is All You Need paper:
         wgt = q @ k.transpose(-2, -1) / math.sqrt(C) # QK^T/sqrt(d_k)
@@ -101,7 +112,7 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
 
     def __init__(self, n_embd):
-        super.__init__()
+        super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
             nn.ReLU(),
@@ -115,7 +126,7 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
 
     def __init__(self, n_embd, n_heads):
-        super.__init__()
+        super().__init__()
         head_size = n_embd // n_heads
         self.self_attn = MultiHeadAttention(n_heads, head_size)
         self.feed_fwd = FeedForward(n_embd)
@@ -123,14 +134,14 @@ class Block(nn.Module):
         self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        x = x + self.selff_attn(self.ln1(x))
+        x = x + self.self_attn(self.ln1(x))
         x = x + self.feed_fwd(self.ln2(x))
         return x
 
 class GPT(nn.Module):
 
     def __init__(self):
-        super.__init__()
+        super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(*[Block(n_embd, n_head) for _ in range(n_layer)])
@@ -138,7 +149,55 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
-        pass
+        B, T = idx.shape
+        
+        tok_embd = self.token_embedding_table(idx)
+        pos_embd = self.position_embedding_table(torch.arange(T, device=device))
+        
+        x = tok_embd + pos_embd
+        x = self.blocks(x)
+        x = self.ln_final(x) 
+        logits = self.lm_head(x)
+
+        if targets is None:
+            loss = None
+        else:
+            B, T, C = logits.shape
+            logits = logits.view(B * T, C)
+            targets = targets.view(B * T)
+            loss = F.cross_entropy(logits, targets)
+
+        return logits, loss
 
     def generate(self, idx, max_new_tokens):
-        pass
+        for _ in range(max_new_tokens):
+            idx_and_context = idx[:, -block_size:]
+            logits, _ = self.forward(idx_and_context)
+            logits = logits[:, -1, :]
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
+
+model = GPT().to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+for iter in range(max_iters):
+
+    if iter % eval_interval == 0:
+        losses = estimate_loss()
+        print(f"Step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
+    xb, yb = get_batch('train')
+
+    logits, loss = model(xb, yb)
+
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+# Generate output from model
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+max_new_tokens = 1000
+generated = model.generate(context, max_new_tokens=max_new_tokens)
+print(decode(generated[0].tolist()))
